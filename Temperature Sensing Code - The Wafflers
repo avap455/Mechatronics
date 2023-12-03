@@ -1,0 +1,233 @@
+// Temp sensing
+
+/*
+    MCP9600_4channel_INT_demo.ino
+    Example for MCP9600
+
+    Copyright (c) 2018 Seeed Technology Co., Ltd.
+    Website    : www.seeed.cc
+    Author     : downey
+    Create Time: May 2018
+    Change Log :
+
+    The MIT License (MIT)
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+    THE SOFTWARE.
+*/
+
+#include "Seeed_MCP9600.h"
+
+// Define the pin numbers on which the outputs are generated.
+#define MOT_A1_PIN 5
+#define MOT_A2_PIN 6
+#define MOT_B1_PIN 9
+#define MOT_B2_PIN 10
+
+#ifdef ARDUINO_SAMD_VARIANT_COMPLIANCE
+#define SERIAL SerialUSB
+#else
+#define SERIAL Serial
+#endif
+
+
+int SensorLeft = 0;
+int SensorRight = 0;
+/* Define the pins for the light sensors */
+int LeftSensor = A1;       // This stores the value of the Left Sensor pin to use later on in the sketch
+int RightSensor = A2;      // This stores the value of the Right Sensor pin to use later on in the sketch
+const int slowSpeed = 200;  // the range for speed is(0,255). We chose 50 as a slower speed to visualize with more control the effect of light on each sensor.
+const int maxSpeed = 200;  // the range for speed is(0,255). We slowed the maximum speed down as well to aid in visualizing the effect of the light on each sensor.
+const int noSpeed = 0;
+const int start_temp = 35;
+const int start_time = 300000;
+const int stop_time = 2500;
+
+
+/* variables to keep track of current speed of motors */
+int leftServoSpeed = 0;
+int rightServoSpeed = 0;
+int leftNoSpeed = 0;
+int rightNoSpeed = 0;
+
+MCP9600 sensor;
+
+/** @brief interruption cfg.
+
+
+ * */
+err_t sensor_INT_config() {
+  err_t ret = NO_ERROR;
+  CHECK_RESULT(ret, sensor.set_filt_coefficients(FILT_MID));
+
+  for (int i = 0; i < 4; i++) {
+    /*Conver temp num to 16bit data*/
+    CHECK_RESULT(ret, sensor.set_alert_limit(i, sensor.covert_temp_to_reg_form(55 + i)));
+    /*  Set hysteresis.for example,set hysteresis to 2℃,when the INT limitation is 30℃,interruption will be generated when
+            the temp ecceed limitation,and the interruption flag will stay unless the temp below 30-2(limitation-hysteresis) 28℃. */
+    CHECK_RESULT(ret, sensor.set_alert_hys(i, 2));
+
+    /*Set when interruption generated the pin's status*/
+    CHECK_RESULT(ret, sensor.set_alert_bit(i, ACTIVE_LOW));
+
+    CHECK_RESULT(ret, sensor.clear_int_flag(i));
+
+    /*default is comparator mode*/
+    CHECK_RESULT(ret, sensor.set_alert_mode_bit(i, COMPARE_MODE));
+
+    /*Set alert pin ENABLE.*/
+    CHECK_RESULT(ret, sensor.set_alert_enable(i, ENABLE));
+  }
+
+  /*device cfg*/
+  CHECK_RESULT(ret, sensor.set_cold_junc_resolution(COLD_JUNC_RESOLUTION_0_25));
+  CHECK_RESULT(ret, sensor.set_ADC_meas_resolution(ADC_14BIT_RESOLUTION));
+  CHECK_RESULT(ret, sensor.set_burst_mode_samp(BURST_32_SAMPLE));
+  CHECK_RESULT(ret, sensor.set_sensor_mode(NORMAL_OPERATION));
+
+  return NO_ERROR;
+}
+
+
+err_t get_temperature(float* value) {
+  err_t ret = NO_ERROR;
+  float hot_junc = 0;
+  float junc_delta = 0;
+  float cold_junc = 0;
+  bool stat = true;
+
+  CHECK_RESULT(ret, sensor.check_data_update(&stat));
+  if (stat) {
+    CHECK_RESULT(ret, sensor.read_hot_junc(&hot_junc));
+    CHECK_RESULT(ret, sensor.read_junc_temp_delta(&junc_delta));
+
+    CHECK_RESULT(ret, sensor.read_cold_junc(&cold_junc));
+
+    *value = hot_junc;
+  } else {
+    SERIAL.println("data not ready!!");
+  }
+
+  return NO_ERROR;
+}
+
+
+void setup() {
+  // Initialize the stepper driver control pins to output drive mode.
+  pinMode(MOT_A1_PIN, OUTPUT);
+  pinMode(MOT_A2_PIN, OUTPUT);
+  pinMode(MOT_B1_PIN, OUTPUT);
+  pinMode(MOT_B2_PIN, OUTPUT);
+
+  // Start with drivers off, motors coasting.
+  digitalWrite(MOT_A1_PIN, LOW);
+  digitalWrite(MOT_A2_PIN, LOW);
+  digitalWrite(MOT_B1_PIN, LOW);
+  digitalWrite(MOT_B2_PIN, LOW);
+  // serial.begin(9600);
+
+  SERIAL.begin(115200);
+  //SERIAL.begin(9600);
+  delay(10);
+  SERIAL.println("serial start!!");
+  if (sensor.init(THER_TYPE_K)) {
+    SERIAL.println("sensor init failed!!");
+  }
+  sensor_INT_config();
+}
+
+// delay(120000);
+
+void loop() {
+  float temp = 0;
+  u8 byte = 0;
+  u8 stat = 0;
+Serial.println("Two-minute countdown to sensing...");
+delay(120000);
+Serial.println("Two minutes have lapsed. Initiating sensing...");
+
+while (true) {
+  get_temperature(&temp);
+  SERIAL.print("temperature ==============================>>");
+  SERIAL.println(temp);
+
+  sensor.read_INT_stat(&stat);
+
+  SERIAL.println(" ");
+  SERIAL.println(" ");
+
+  if (temp >= start_temp) {
+
+    boolean reverse = 0;  //digitalRead(switchPin);
+
+    {
+      Serial.println("Peak Temperature Achieved! :)");
+      Serial.println("Detonation in T-6 minutes :)");
+      delay(360000);
+      Serial.println("Moving now!");
+      // This section of the sketch is what actually interprets the data and then runs the motors accordingly.
+      leftServoSpeed = slowSpeed;   // This is used to turn left making the left servo much slower than the right servo
+      rightServoSpeed = slowSpeed;  // opposite motor runs to turn Left
+      leftNoSpeed = noSpeed;
+      rightNoSpeed = noSpeed;
+      // shorten this later :)
+      set_motor_currents(-leftServoSpeed, rightServoSpeed);
+      delay(stop_time);
+      set_motor_currents(leftNoSpeed, rightNoSpeed);
+      exit(0);
+    }
+  }
+  else {
+    delay(1000);
+    Serial.println(temp);
+    set_motor_currents(0, 0);
+  }
+}
+}
+
+/// +ram pwm    PWM duty cycle ranging from -255 full reverse to 255 full forward
+/// \param IN1_PIN  pin number xIN1 for the given channel
+/// \param IN2_PIN  pin number xIN2 for the given channel
+
+void set_motor_pwm(int pwm, int IN1_PIN, int IN2_PIN) {
+
+  if (pwm < 0) {  // reverse speeds
+    analogWrite(IN1_PIN, -pwm);
+    digitalWrite(IN2_PIN, LOW);
+
+  } else {  // stop or forward
+    digitalWrite(IN1_PIN, LOW);
+    analogWrite(IN2_PIN, pwm);
+  }
+  }
+
+
+/// Set the current on both motors.
+/// \param pwm_A  motor A PWM, -255 to 255
+/// \param pwm_B  motor B PWM, -255 to 255
+
+
+void set_motor_currents(int pwm_A, int pwm_B){
+  set_motor_pwm(pwm_A, MOT_A1_PIN, MOT_A2_PIN);
+  set_motor_pwm(pwm_B, MOT_B1_PIN, MOT_B2_PIN);
+// Print a status message to the console.
+  Serial.print("Set motor A PWM = ");
+  Serial.print(pwm_A);
+  Serial.print(" motor B PWM = ");
+  Serial.println(pwm_B);
+}
