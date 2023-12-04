@@ -21,7 +21,7 @@ the cooking time specific to a certain food.
 
 ### What did we learn?
 
-**Lexi:** How to work on a team underpressure (while maintaining friendships). 
+**Lexi:** How to work on a team under pressure (while maintaining friendships). 
 How to better communicate team learnings especially when team meetings are cut short or not everyone is there. 
 Keeping everyone up-to-date which allowed us to stay on track and meet our sprint goals.
 
